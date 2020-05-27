@@ -1,4 +1,4 @@
-// Regressoion test for https://github.com/alexcrichton/toml-rs/issues/342
+// Regression test for https://github.com/alexcrichton/toml-rs/issues/342
 
 use bencher::{benchmark_group, benchmark_main, black_box, Bencher};
 use toml::Value;
