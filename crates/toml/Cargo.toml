@@ -19,6 +19,7 @@ edition = "2018"
 [dependencies]
 serde = "1.0.97"
 indexmap = { version = "1.0", optional = true }
+toml_lexer = { path = "../toml_lexer" }
 
 [dev-dependencies]
 serde_derive = "1.0"

@@ -1,0 +1,20 @@
+[package]
+name = "toml_lexer"
+version = "0.5.6"
+authors = ["Alex Crichton <alex@alexcrichton.com>"]
+license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = ["encoding"]
+repository = "https://github.com/alexcrichton/toml-rs"
+homepage = "https://github.com/alexcrichton/toml-rs"
+documentation = "https://docs.rs/toml_lexer"
+description = "Low-level TOML lexer, very lightweight."
+categories = ["config", "encoding", "lexer-implementations"]
+edition = "2018"
+
+[dependencies]
+
+[dev-dependencies]
+serde_derive = "1.0"
+serde_json = "1.0"
+once_cell = "1.4"
