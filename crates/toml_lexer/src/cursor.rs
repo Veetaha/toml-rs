@@ -2,12 +2,12 @@ use crate::Span;
 
 /// Forward-only cursor into a string that normalizes `\r\n` to `\n`
 #[derive(Debug, Clone)]
-pub(crate) struct Cursor<'a> {
-    string: &'a str,
-    chars: CrlfFold<'a>,
+pub(crate) struct Cursor<'s> {
+    string: &'s str,
+    chars: CrlfFold<'s>,
 }
 
-impl<'a> Cursor<'a> {
+impl<'s> Cursor<'s> {
     pub(crate) fn new(string: &str) -> Cursor<'_> {
         Cursor {
             string,
@@ -17,13 +17,13 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub(crate) fn string(&self) -> &'a str {
+    pub(crate) fn string(&self) -> &'s str {
         self.string
     }
 
     /// Returns the already consumed slice of the string (i.e. from index 0 to last consumed char).
-    pub(crate) fn consumed_slice(&self) -> &'a str {
-        let span = self.step_span(0);
+    pub(crate) fn consumed_slice(&self) -> &'s str {
+        let span = self.span_from(0);
         &self.string[0..span.end]
     }
 
@@ -38,7 +38,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Calculate the span of the currently analyzed token.
-    pub(crate) fn step_span(&self, start: usize) -> Span {
+    pub(crate) fn span_from(&self, start: usize) -> Span {
         Span {
             start,
             end: self.current_index(),
@@ -77,11 +77,11 @@ impl<'a> Cursor<'a> {
 }
 
 #[derive(Debug, Clone)]
-struct CrlfFold<'a> {
-    chars: std::str::CharIndices<'a>,
+struct CrlfFold<'s> {
+    chars: std::str::CharIndices<'s>,
 }
 
-impl<'a> Iterator for CrlfFold<'a> {
+impl<'s> Iterator for CrlfFold<'s> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<(usize, char)> {
