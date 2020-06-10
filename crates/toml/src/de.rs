@@ -21,7 +21,7 @@ use serde::de::IntoDeserializer;
 use crate::datetime;
 use crate::spanned;
 use crate::tokens::{
-    Describe, Error as TokenError, EscapeErrorKind, HexLen, LexerError, LexerErrorKind, Span,
+    Error as TokenError, HexLen, Span,
     Token, Tokenizer,
 };
 
@@ -114,7 +114,7 @@ enum ErrorKind {
     NotEnoughDigitsInHex { expected: HexLen, actual: u32 },
 
     /// Invalid character in shorthand escape (shorthand escapes are `\, \b, \f, \n, \r, \t, \", \'`)
-    InvalidShorthandEscape(char),
+    InvalidShorthandEscape(Option<char>),
 
     /// No newline character after the backslash-whitespace sequence, e.g.
     /// ```toml
@@ -1966,41 +1966,27 @@ impl<'a> Deserializer<'a> {
     }
 
     fn token_error(&self, error: TokenError) -> Error {
-        match error {
-            TokenError::Lexer(LexerError { kind, at }) => {
-                let err = match kind {
-                    LexerErrorKind::Escape(err) => match err {
-                        EscapeErrorKind::InvalidCharInString(ch) => {
-                            ErrorKind::InvalidCharInString(ch)
-                        }
-                        EscapeErrorKind::InvalidShorthandEscape(ch) => {
-                            ErrorKind::InvalidShorthandEscape(ch)
-                        }
-                        EscapeErrorKind::NotEnoughDigitsInHex { expected, actual } => {
-                            ErrorKind::NotEnoughDigitsInHex { expected, actual }
-                        }
-                        EscapeErrorKind::InvalidEscapeValue(val) => {
-                            ErrorKind::InvalidEscapeValue(val)
-                        }
-                        EscapeErrorKind::BannedChar(ch) => ErrorKind::InvalidCharInString(ch),
-                        EscapeErrorKind::UnterminatedString => ErrorKind::UnterminatedString,
-                        EscapeErrorKind::NoNewlineInTrimmedWhitespace => {
-                            ErrorKind::NoNewlineInTrimmedWhitespace
-                        }
-                    },
-                    LexerErrorKind::Unexpected(ch) => ErrorKind::Unexpected(ch),
-                };
-                self.error(at, err)
+        let (at, error) = match error {
+            TokenError::InvalidCharInString(at, ch) => (at, ErrorKind::InvalidCharInString(ch)),
+            TokenError::InvalidShorthandEscape(at, ch) => (at, ErrorKind::InvalidShorthandEscape(ch)),
+            TokenError::NotEnoughDigitsInHex { at, expected, actual } => {
+                (at, ErrorKind::NotEnoughDigitsInHex { expected, actual })
             }
-            TokenError::NewlineInTableKey(at) => self.error(at, ErrorKind::NewlineInTableKey),
+            TokenError::InvalidEscapeValue(at, ch) => (at, ErrorKind::InvalidEscapeValue(ch)),
+            TokenError::InvalidCharInString(at, ch) => (at, ErrorKind::InvalidCharInString(ch)),
+            TokenError::UnterminatedString(at) => (at, ErrorKind::UnterminatedString),
+            TokenError::NoNewlineInTrimmedWhitespace(at) => (at, ErrorKind::NoNewlineInTrimmedWhitespace),
+            TokenError::Unexpected(at, ch) => (at, ErrorKind::Unexpected(ch)),
+            TokenError::NewlineInTableKey(at) => (at, ErrorKind::NewlineInTableKey),
             TokenError::Wanted {
                 at,
                 expected,
                 found,
-            } => self.error(at, ErrorKind::Wanted { expected, found }),
-            TokenError::EmptyTableKey(at) => self.error(at, ErrorKind::EmptyTableKey),
-            TokenError::MultilineStringKey(at) => self.error(at, ErrorKind::MultilineStringKey),
-        }
+            } => (at, ErrorKind::Wanted { expected, found }),
+            TokenError::EmptyTableKey(at) => (at, ErrorKind::EmptyTableKey),
+            TokenError::MultilineStringKey(at) => (at, ErrorKind::MultilineStringKey),
+        };
+        self.error(at, error)
     }
 
     fn error(&self, at: usize, kind: ErrorKind) -> Error {
@@ -2109,8 +2095,11 @@ impl fmt::Display for Error {
                 u32::from(expected),
                 actual
             )?,
-            ErrorKind::InvalidShorthandEscape(ch) => {
+            ErrorKind::InvalidShorthandEscape(Some(ch)) => {
                 write!(f, "invalid escape character in string: `{}`", ch)?
+            }
+            ErrorKind::InvalidShorthandEscape(None) => {
+                write!(f, "expected escape character after `\\`")?
             }
             ErrorKind::NoNewlineInTrimmedWhitespace => {
                 write!(f, "whitespace trimming escape is not the last on the line",)?
