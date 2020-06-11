@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, str};
+use std::{borrow::Cow, str};
 pub(crate) use toml_lexer::{HexLen, Span, QuotesLen};
 
 // Entirely wellformed token of TOML language
@@ -81,15 +81,13 @@ pub(crate) enum Error {
 /// one which is very generic on purpose and resides in `toml_lexer` crate.
 #[derive(Clone)]
 pub(crate) struct Tokenizer<'s> {
-    inner: toml_lexer::Tokenizer<'s>,
-    lookahead: Option<Result<Option<(Span, Token<'s>)>, Error>>,
+    inner: toml_lexer::Tokenizer<'s>
 }
 
 impl<'s> Tokenizer<'s> {
     pub(crate) fn new(input: &'s str) -> Tokenizer<'s> {
         Tokenizer {
             inner: toml_lexer::Tokenizer::new(input),
-            lookahead: None,
         }
     }
 
@@ -97,17 +95,8 @@ impl<'s> Tokenizer<'s> {
         self.inner.input()
     }
 
-    pub(crate) fn peek(&mut self) -> Result<Option<(Span, Token<'s>)>, Error> {
-        if matches!(self.lookahead, None) {
-            let next = self.next();
-            // next() may fill `.lookahead` with the token in unescape_next_str_lit()
-            return self.lookahead.get_or_insert(next).clone();
-        }
-
-        match self.lookahead {
-            Some(ref mut it) => it.clone(),
-            None => unreachable!("Ownership workaround :D copied from Option::get_or_insert_with()"),
-        }
+    pub(crate) fn peek(&self) -> Result<Option<(Span, Token<'s>)>, Error> {
+        self.clone().next()
     }
 
     pub fn current_index(&self) -> usize {
@@ -119,11 +108,6 @@ impl<'s> Tokenizer<'s> {
     }
 
     pub(crate) fn next(&mut self) -> Result<Option<(Span, Token<'s>)>, Error> {
-        match self.lookahead.take() {
-            Some(it) => return it,
-            None => {}
-        }
-
         let token = match self.inner.next() {
             Some(it) => it,
             None => return Ok(None),
@@ -158,7 +142,8 @@ impl<'s> Tokenizer<'s> {
             toml_lexer::TokenKind::RightBracket => Token::RightBracket,
             toml_lexer::TokenKind::Keylike => Token::Keylike(self.input_slice(token.span)),
             toml_lexer::TokenKind::Unknown => {
-                return Ok(Err(Error::Unexpected(token.span.start, self.input().chars().next().unwrap())));
+                let slice = self.input_slice(token.span);
+                return Ok(Err(Error::Unexpected(token.span.start, slice.chars().next().unwrap())));
             }
             toml_lexer::TokenKind::StrLitSubtoken(it) => {
                 return Err((token.span, it))
@@ -169,61 +154,51 @@ impl<'s> Tokenizer<'s> {
     }
 
     fn unescape_next_str_lit(&mut self, leading_quotes_span: Span, quotes: toml_lexer::Quotes) -> Result<Option<(Span, Token<'s>)>, Error> {
-        let mut unescaped = MaybeEscaped::new(&self.input()[leading_quotes_span.start..]);
+        let mut unescaped = MaybeEscaped::new(self.input(), leading_quotes_span.end);
 
         let end = loop {
-            let token = match self.inner.next() {
-                Some(it) => it,
-                None => break self.input().len(),
+            let (span, subtoken) = match self.inner.clone().next() {
+                Some(toml_lexer::Token { span, kind: toml_lexer::TokenKind::StrLitSubtoken(it) }) => (span, it),
+                _ => return Err(Error::UnterminatedString(leading_quotes_span.start)),
             };
-
-            match token.kind {
-                toml_lexer::TokenKind::StrLitSubtoken(it) => {
-                    unescaped.append(match it {
-                        toml_lexer::StrLitSubtoken::UnicodeEscape { unescaped, kind } => match unescaped {
-                            toml_lexer::UnicodeEscape::Valid(ch) => ch,
-                            toml_lexer::UnicodeEscape::NotEnoughDigits(actual) => {
-                                return Err(Error::NotEnoughDigitsInHex {
-                                    at: token.span.start,
-                                    actual,
-                                    expected: kind,
-                                })
-                            }
-                            toml_lexer::UnicodeEscape::InvalidScalarValue(val) => {
-                                return Err(Error::InvalidEscapeValue(token.span.start, val))
-                            }
-                        },
-                        toml_lexer::StrLitSubtoken::ShorthandEscape(ch) => match ch {
-                            Ok(ch) => ch,
-                            Err(ch) => return Err(Error::InvalidShorthandEscape(token.span.start, ch))
-                        },
-                        toml_lexer::StrLitSubtoken::Char(ch) => ch,
-                        toml_lexer::StrLitSubtoken::BannedChar(it) => {
-                            return Err(Error::InvalidCharInString(token.span.start, it))
-                        }
-                        toml_lexer::StrLitSubtoken::TrimmedWhitespace {
-                            includes_newline: false,
-                        } => {
-                            return Err(Error::NoNewlineInTrimmedWhitespace(token.span.start))
-                        }
-                        toml_lexer::StrLitSubtoken::TrimmedWhitespace {
-                            includes_newline: true,
-                        }
-                        | toml_lexer::StrLitSubtoken::TrailingQuotes
-                        | toml_lexer::StrLitSubtoken::LeadingQuotes { .. }
-                        | toml_lexer::StrLitSubtoken::LeadingNewline => {
-                            unescaped.skip(token.span);
-                            continue;
-                        }
-                    })
+            self.inner.next();
+            unescaped.append(match subtoken {
+                toml_lexer::StrLitSubtoken::UnicodeEscape { unescaped, kind } => match unescaped {
+                    toml_lexer::UnicodeEscape::Valid(ch) => ch,
+                    toml_lexer::UnicodeEscape::NotEnoughDigits(actual) => {
+                        return Err(Error::NotEnoughDigitsInHex {
+                            at: span.start,
+                            actual,
+                            expected: kind,
+                        })
+                    }
+                    toml_lexer::UnicodeEscape::InvalidScalarValue(val) => {
+                        return Err(Error::InvalidEscapeValue(span.start, val))
+                    }
+                },
+                toml_lexer::StrLitSubtoken::ShorthandEscape(ch) => match ch {
+                    Ok(ch) => ch,
+                    Err(ch) => return Err(Error::InvalidShorthandEscape(span.start, ch))
+                },
+                toml_lexer::StrLitSubtoken::Char(ch) => ch,
+                toml_lexer::StrLitSubtoken::BannedChar(it) => {
+                    return Err(Error::InvalidCharInString(span.start, it))
                 }
-                _ => {
-                    let end = token.span.end;
-                    // Remember the token, to be returned next
-                    self.lookahead = Some(self.into_non_str_lit(token).expect("non string literal subtoken"));
-                    break end;
+                toml_lexer::StrLitSubtoken::TrimmedWhitespace {
+                    includes_newline: false,
+                } => {
+                    return Err(Error::NoNewlineInTrimmedWhitespace(span.start))
                 }
-            }
+                toml_lexer::StrLitSubtoken::TrimmedWhitespace {
+                    includes_newline: true,
+                }
+                | toml_lexer::StrLitSubtoken::LeadingQuotes { .. }
+                | toml_lexer::StrLitSubtoken::LeadingNewline => {
+                    unescaped.skip(span);
+                    continue;
+                }
+                toml_lexer::StrLitSubtoken::TrailingQuotes => break span.end
+            });
         };
 
         let span = Span {
@@ -371,8 +346,8 @@ enum MaybeEscaped<'s> {
 
 // TODO: test
 impl<'s> MaybeEscaped<'s> {
-    fn new(source: &str) -> MaybeEscaped<'_> {
-        MaybeEscaped::NotEscaped(source, source.char_indices(), 0)
+    fn new(source: &str, begin: usize) -> MaybeEscaped<'_> {
+        MaybeEscaped::NotEscaped(source, source[begin..].char_indices(), begin)
     }
 
     fn skip(&mut self, span: Span) {
@@ -420,218 +395,193 @@ impl<'s> MaybeEscaped<'s> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     macro_rules! assert_matches {
-//         ($val:expr, $pat:pat) => {{
-//             let val = &$val;
-//             if !matches!(val, $pat) {
-//                 let val_str = stringify!($val);
-//                 let pat_str = stringify!($pat);
-//                 panic!(
-//                     "{} doesn't match the pattern: {}\n actual value: {:?}",
-//                     val_str, pat_str, val
-//                 );
-//             }
-//         }};
-//     }
+    macro_rules! assert_matches {
+        ($val:expr, $pat:pat) => {{
+            let val = &$val;
+            if !matches!(val, $pat) {
+                let val_str = stringify!($val);
+                let pat_str = stringify!($pat);
+                panic!(
+                    "{} doesn't match the pattern: {}\n actual value: {:?}",
+                    val_str, pat_str, val
+                );
+            }
+        }};
+    }
 
-//     #[test]
-//     fn unescape_borrows_when_possible() {
-//         use unescape_str_lit as unescape;
+    fn unescape(literal: &str) -> Cow<'_, str> {
+        match Tokenizer::new(literal).next().unwrap().unwrap().1 {
+            Token::String { val, .. } => val,
+            it => panic!("Lexed not a string-literal: {:?}", it)
+        }
+    }
 
-//         assert_matches!(unescape("'abcdef'"), Some(Cow::Borrowed("abcdef")));
-//         assert_matches!(unescape("'abcdef"), Some(Cow::Borrowed("abcdef")));
-//         assert_matches!(unescape("'''abcdef'"), Some(Cow::Borrowed("abcdef'")));
-//         assert_matches!(unescape("'''\nabcdef"), Some(Cow::Borrowed("abcdef")));
-//         assert_matches!(
-//             unescape("\"\"\"\\ \t \n \t abcdef"),
-//             Some(Cow::Borrowed("abcdef"))
-//         );
-//         assert_matches!(unescape(r#""\\""#), Some(Cow::Borrowed("\\")));
-//     }
+    #[test]
+    fn unescape_borrows_when_possible() {
+        assert_matches!(unescape("'abcdef'"), Cow::Borrowed("abcdef"));
+        assert_matches!(unescape("'abcdef'"), Cow::Borrowed("abcdef"));
+        assert_matches!(unescape("'''abcdef''''"), Cow::Borrowed("abcdef'"));
+        assert_matches!(unescape("'''\nabcdef'''"), Cow::Borrowed("abcdef"));
+        assert_matches!(
+            unescape("\"\"\"\\ \t \n \t abcdef\"\"\""),
+            Cow::Borrowed("abcdef")
+        );
+        assert_matches!(unescape(r#""\\""#), Cow::Borrowed("\\"));
+    }
 
-//     #[test]
-//     fn unescape_returns_owned_when_meets_escapes() {
-//         use unescape_str_lit as unescape;
+    #[test]
+    fn unescape_returns_owned_when_meets_escapes() {
+        use unescape as unescape;
 
-//         let t = |input, expected: &str| {
-//             let actual = unescape(input);
-//             assert_matches!(actual, Some(Cow::Owned(_)));
-//             assert_eq!(actual, Some(expected.into()));
-//         };
+        let t = |input, expected: &str| {
+            let actual = unescape(input);
+            assert_matches!(actual, Cow::Owned(_));
+            assert_eq!(actual, Cow::Borrowed(expected));
+        };
 
-//         t(r#""\t""#, "\t");
-//         t(r#""""abc\ a"#, "abca");
-//         t(r#""\u1234""#, "\u{1234}");
-//     }
+        t(r#""\t""#, "\t");
+        t("\"\"\"abc\\ \n a\"\"\"", "abca");
+        t(r#""\u1234""#, "\u{1234}");
+    }
 
-//     mod strings {
-//         use super::*;
-//         use Flags::*;
+    mod strings {
+        use super::*;
 
-//         /// B - basic
-//         /// L - literal
-//         /// S - single-line
-//         /// M - multi-line
-//         /// T - terminated
-//         /// U - unterminated
-//         #[derive(Copy, Clone)]
-//         enum Flags {
-//             BST,
-//             BSU,
-//             BMT,
-//             BMU,
-//             LST,
-//             LSU,
-//             LMT,
-//             LMU,
-//         }
+        #[test]
+        fn terminated_empty_strings() {
+            use assert_empty_string as t;
 
-//         fn str(flags: Flags) -> Token {
-//             let (terminated, multiline, kind) = match flags {
-//                 BMT => (true, true, StringKind::Basic),
-//                 BMU => (false, true, StringKind::Basic),
-//                 BST => (true, false, StringKind::Basic),
-//                 BSU => (false, false, StringKind::Basic),
-//                 LMT => (true, true, StringKind::Literal),
-//                 LMU => (false, true, StringKind::Literal),
-//                 LST => (true, false, StringKind::Literal),
-//                 LSU => (false, false, StringKind::Literal),
-//             };
-//             String {
-//                 kind,
-//                 multiline,
-//                 terminated,
-//             }
-//         }
+            t("''", false);
+            t("''''''", true);
+            t("'''\n'''", true);
 
-//         fn assert_single_string(flags: Flags, input: &str, expected_unescaped: &str) {
-//             assert_single_token(input, str(flags));
-//             let unescaped = crate::unescape_str_lit(input).unwrap();
-//             assert_eq!(unescaped, expected_unescaped, "input: {{{}}}", input);
-//         }
+            t(r#""""#, false);
+            t(r#""""""""#, true);
 
-//         fn assert_empty_string(flags: Flags, input: &str) {
-//             assert_single_string(flags, input, "");
-//         }
+            t("\"\"\"\n\"\"\"", true);
+            t("\"\"\"\n\\\n  \t\t  \"\"\"", true);
+        }
 
-//         #[test]
-//         fn terminated_empty_strings() {
-//             use assert_empty_string as t;
+        #[test]
+        fn single_char_strings() {
+            use assert_single_string as t;
 
-//             t(LST, "''");
-//             t(LMT, "''''''");
-//             t(LMT, "'''\n'''");
+            t("'a'", "a", false);
+            t("' '", " ", false);
+            t("'\t'", "\t", false);
+            t("'''a'''", "a", true);
+            t("''' '''", " ", true);
+            t("'''\t'''", "\t", true);
+            t("'''''''", "'", true);
+            t(r#""a""#, "a", false);
+            t(r#""\t""#, "\t", false);
+            t("\"\t\"", "\t", false);
+            t(r#""""a""""#, "a", true);
+            t(r#"""""""""#, "\"", true);
+            t(r#""""\t""""#, "\t", true);
+            t("\"\"\"\t\"\"\"", "\t", true);
+            t(r#""""\"""""#, "\"", true);
+        }
 
-//             t(BST, r#""""#);
-//             t(BMT, r#""""""""#);
+        #[test]
+        fn multi_char_strings() {
+            use assert_single_string as t;
 
-//             t(BMT, "\"\"\"\n\"\"\"");
-//             t(BMT, "\"\"\"\n\\\n  \t\t  \"\"\"");
-//         }
+            t("'ab'", "ab", false);
+            t("'\"a'", "\"a", false);
+            t("'\\t'", "\\t", false);
 
-//         #[test]
-//         fn single_char_strings() {
-//             use assert_single_string as t;
+            t("''''''''", "''", true);
+            t(r#""""""""""#, "\"\"", true);
 
-//             t(LST, "'a'", "a");
-//             t(LST, "' '", " ");
-//             t(LST, "'\t'", "\t");
-//             t(LMT, "'''a'''", "a");
-//             t(LMT, "''' '''", " ");
-//             t(LMT, "'''\t'''", "\t");
-//             t(LMT, "'''''''", "'");
-//             t(BST, r#""a""#, "a");
-//             t(BST, r#""\t""#, "\t");
-//             t(BST, "\"\t\"", "\t");
-//             t(BMT, r#""""a""""#, "a");
-//             t(BMT, r#"""""""""#, "\"");
-//             t(BMT, r#""""\t""""#, "\t");
-//             t(BMT, "\"\"\"\t\"\"\"", "\t");
-//             t(BMT, r#""""\"""""#, "\"");
-//         }
+            t("'''\n'a\n'''", "'a\n", true);
+            t("'''a\n'a\r\n'''", "a\n'a\n", true);
+            t("'\\U00'", "\\U00", false);
 
-//         #[test]
-//         fn multi_char_strings() {
-//             use assert_single_string as t;
+            t(r#""\\t""#, "\\t", false);
+            t(r#""""\\t""""#, "\\t", true);
+        }
 
-//             t(LST, "'ab'", "ab");
-//             t(LST, "'\"a'", "\"a");
-//             t(LST, "'\\t'", "\\t");
+        #[test]
+        fn unterminated_strings() {
+            let t = |input| err(input, Error::UnterminatedString(0));
 
-//             t(LMT, "''''''''", "''");
-//             t(BMT, r#""""""""""#, "\"\"");
+            t("'''''");
+            t(r#"""""""#);
+            t("''''");
+            t(r#""""""#);
 
-//             t(LMT, "'''\n'a\n'''", "'a\n");
-//             t(LMT, "'''a\n'a\r\n'''", "a\n'a\n");
-//             t(LST, "'\\U00'", "\\U00");
+            t("'a");
+            t("'\\");
 
-//             t(BST, r#""\\t""#, "\\t");
-//             t(BMT, r#""""\\t""""#, "\\t");
-//         }
+            t(r#""a"#);
+            t(r#""\""#);
 
-//         #[test]
-//         fn unterminated_strings() {
-//             use assert_single_string as t;
+            t("'''a");
+            t("'''\\");
 
-//             t(LMU, "'''''", "''");
-//             t(BMU, r#"""""""#, "\"\"");
-//             t(LMU, "''''", "'");
-//             t(BMU, r#""""""#, "\"");
+            t(r#""""a"#);
+            t(r#""""\""#);
+        }
 
-//             t(LSU, "'a", "a");
-//             t(LSU, "'\\", "\\");
+        #[test]
+        fn with_escapes() {
+            use assert_single_string as t;
 
-//             t(BSU, r#""a"#, "a");
-//             t(BSU, r#""\"#, "�");
-//             t(BSU, r#""\""#, "\"");
+            t("\"\"\"\n\t\"\"\"", "\t", true);
+            t("\"\"\"\\\n\"\"\"", "", true);
+            t(
+                "\"\"\"\\\n     \t   \t  \\\r\n  \t \n  \t \r\n\"\"\"",
+                "",
+                true,
+            );
+            t(r#""\r""#, "\r", false);
+            t(r#""\n""#, "\n", false);
+            t(r#""\b""#, "\u{8}", false);
+            t(r#""a\fa""#, "a\u{c}a", false);
+            t(r#""\"a""#, "\"a", false);
+            t("\"\"\"\na\"\"\"", "a", true);
+            t(r#""""a\"""b""""#, "a\"\"\"b", true);
+        }
 
-//             t(LMU, "'''a", "a");
-//             t(LMU, "'''\\", "\\");
 
-//             t(BMU, r#""""a"#, "a");
-//             t(BMU, r#""""\"#, "�");
-//             t(BMU, r#""""\""#, "\"");
 
-//             assert_tokens("'\\''", vec![((0, 3), str(LST)), ((3, 4), str(LSU))]);
-//             assert_tokens(
-//                 "'foo\n'",
-//                 vec![
-//                     ((0, 4), str(LSU)),
-//                     ((4, 5), Token::Newline),
-//                     ((5, 6), str(LSU)),
-//                 ],
-//             );
-//             assert_tokens(
-//                 "\"foo\n\"",
-//                 vec![
-//                     ((0, 4), str(BSU)),
-//                     ((4, 5), Token::Newline),
-//                     ((5, 6), str(BSU)),
-//                 ],
-//             );
-//         }
+        fn assert_single_string(input: &str, expected_unescaped: &str, multiline: bool) {
+            assert_single_token(input, Token::String {
+                src: input,
+                val: Cow::Borrowed(expected_unescaped),
+                multiline,
+            });
+            assert_eq!(unescape(input), expected_unescaped, "input: {{{}}}", input);
+        }
 
-//         #[test]
-//         fn with_escapes() {
-//             use assert_single_string as t;
+        fn assert_empty_string(input: &str, multiline: bool) {
+            assert_single_string(input, "", multiline);
+        }
+    }
 
-//             t(BMT, "\"\"\"\n\t\"\"\"", "\t");
-//             t(BMT, "\"\"\"\\\n\"\"\"", "");
-//             t(
-//                 BMT,
-//                 "\"\"\"\\\n     \t   \t  \\\r\n  \t \n  \t \r\n\"\"\"",
-//                 "",
-//             );
-//             t(BST, r#""\r""#, "\r");
-//             t(BST, r#""\n""#, "\n");
-//             t(BST, r#""\b""#, "\u{8}");
-//             t(BST, r#""a\fa""#, "a\u{c}a");
-//             t(BST, r#""\"a""#, "\"a");
-//             t(BMT, "\"\"\"\na\"\"\"", "a");
-//             t(BMT, r#""""a\"""b""""#, "a\"\"\"b");
-//         }
-//     }
-// }
+    fn assert_tokens(input: &str, expected: Vec<((usize, usize), Token<'_>, &str)>) {
+        let mut sut = Tokenizer::new(input);
+        let mut actual: Vec<_> = Vec::new();
+        while let Some((span, token)) = sut.next().unwrap() {
+            actual.push((span.into(), token, &input[span.start..span.end]));
+        }
+        assert_eq!(actual, expected, "input: {}", input);
+    }
+
+    fn assert_single_token(input: &str, expected: Token<'_>) {
+        assert_tokens(input, vec![((0, input.len()), expected, input)]);
+    }
+
+
+    fn err(input: &str, err: Error) {
+        let mut t = Tokenizer::new(input);
+        let token = t.next().unwrap_err();
+        assert_eq!(token, err);
+        assert!(t.next().unwrap().is_none());
+    }
+}

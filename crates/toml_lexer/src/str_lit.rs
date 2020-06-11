@@ -308,6 +308,7 @@ impl Iterator for StrLitTokenizer<'_> {
                 if self.multiline && self.cursor.eatc('\n') {
                     StrLitSubtoken::LeadingNewline
                 } else {
+                    // single-stackframe recursive call with the new state
                     return self.next();
                 }
             }

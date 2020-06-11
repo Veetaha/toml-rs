@@ -1973,7 +1973,6 @@ impl<'a> Deserializer<'a> {
                 (at, ErrorKind::NotEnoughDigitsInHex { expected, actual })
             }
             TokenError::InvalidEscapeValue(at, ch) => (at, ErrorKind::InvalidEscapeValue(ch)),
-            TokenError::InvalidCharInString(at, ch) => (at, ErrorKind::InvalidCharInString(ch)),
             TokenError::UnterminatedString(at) => (at, ErrorKind::UnterminatedString),
             TokenError::NoNewlineInTrimmedWhitespace(at) => (at, ErrorKind::NoNewlineInTrimmedWhitespace),
             TokenError::Unexpected(at, ch) => (at, ErrorKind::Unexpected(ch)),

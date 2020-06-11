@@ -513,7 +513,7 @@ fn bad_strings() {
         "foo = \"\\u\"",
         "expected 4 digits in unicode escape, but got 0 at line 1 column 8"
     );
-    bad!("foo = \"\\", "unterminated string at line 1 column 7");
+    bad!("foo = \"\\", "expected escape character after `\\` at line 1 column 8");
     bad!("foo = '", "unterminated string at line 1 column 7");
 }
 

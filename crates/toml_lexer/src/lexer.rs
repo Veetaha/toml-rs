@@ -3,7 +3,6 @@ use std::str;
 
 use crate::{cursor::Cursor, str_lit, Span};
 use TokenKind::*;
-
 /// Represents a (possibly malformed) lexeme of TOML language.
 pub struct Token {
     /// Span that the token occupies in the input string
@@ -59,14 +58,11 @@ pub enum TokenKind {
 /// }
 /// ```
 #[derive(Clone)]
-pub struct Tokenizer<'s> {
-    cursor: Cursor<'s>,
-    state: State<'s>,
-}
+pub struct Tokenizer<'s>(State<'s>);
 
 #[derive(Clone)]
 enum State<'s> {
-    ReadingContent,
+    ReadingContent(Cursor<'s>),
     ReadingStrLit(str_lit::StrLitTokenizer<'s>),
 }
 
@@ -80,41 +76,46 @@ impl<'s> Tokenizer<'s> {
 
         // Eat utf-8 BOM
         cursor.eatc('\u{feff}');
-        Tokenizer {
-            cursor,
-            state: State::ReadingContent,
+        Tokenizer(State::ReadingContent(cursor))
+    }
+
+    fn cursor(&self) -> &Cursor<'s> {
+        match &self.0 {
+            State::ReadingContent(it) => it,
+            State::ReadingStrLit(it) => it.cursor(),
         }
     }
 
     /// Returns the input string which `Tokenizer` was initially created with.
     pub fn input(&self) -> &'s str {
-        self.cursor.string()
+        self.cursor().string()
     }
+
 
     /// The offset in the input string of the next token to be lexed.
     pub fn current_index(&self) -> usize {
-        self.cursor.current_index()
+        self.cursor().current_index()
     }
 
-    fn whitespace_token(&mut self) -> TokenKind {
-        while self.cursor.eatc(' ') || self.cursor.eatc('\t') {
+    fn whitespace_token(cursor: &mut Cursor<'s>) -> TokenKind {
+        while cursor.eatc(' ') || cursor.eatc('\t') {
             // ...
         }
         Whitespace
     }
 
-    fn comment_token(&mut self) -> TokenKind {
-        debug_assert!(self.cursor.consumed_slice().ends_with('#'));
+    fn comment_token(cursor: &mut Cursor<'s>) -> TokenKind {
+        debug_assert!(cursor.consumed_slice().ends_with('#'));
 
-        while matches!(self.cursor.peek_one(), Some(ch) if ch == '\t' || ch >= '\u{20}') {
-            self.cursor.one();
+        while matches!(cursor.peek_one(), Some(ch) if ch == '\t' || ch >= '\u{20}') {
+            cursor.one();
         }
         Comment
     }
 
-    fn keylike(&mut self) -> TokenKind {
-        while matches!(self.cursor.peek_one(), Some(ch) if is_keylike(ch)) {
-            self.cursor.one();
+    fn keylike(cursor: &mut Cursor<'s>) -> TokenKind {
+        while matches!(cursor.peek_one(), Some(ch) if is_keylike(ch)) {
+            cursor.one();
         }
         Keylike
     }
@@ -125,26 +126,26 @@ impl<'s> Iterator for Tokenizer<'s> {
 
     /// Analyzes the next token in the input string.
     fn next(&mut self) -> Option<Token> {
-        match self.state {
-            State::ReadingContent => {
+        match self.0 {
+            State::ReadingContent(ref mut cursor) => {
                 // Try to read a string literal
-                if let Some(it) = str_lit::StrLitTokenizer::from_cursor(self.cursor.clone()) {
+                if let Some(it) = str_lit::StrLitTokenizer::from_cursor(cursor.clone()) {
                     let (leading_quotes_span, leading_quotes, subtokenizer) = it;
                     let kind =
                         StrLitSubtoken(str_lit::StrLitSubtoken::LeadingQuotes(leading_quotes));
 
-                    self.state = State::ReadingStrLit(subtokenizer);
+                    self.0 = State::ReadingStrLit(subtokenizer);
                     return Some(Token {
                         span: leading_quotes_span,
                         kind,
                     });
                 }
 
-                let (start, ch) = self.cursor.one_with_index()?;
+                let (start, ch) = cursor.one_with_index()?;
                 let kind = match ch {
                     '\n' => Newline,
-                    ' ' | '\t' => self.whitespace_token(),
-                    '#' => self.comment_token(),
+                    ' ' | '\t' => Self::whitespace_token(cursor),
+                    '#' => Self::comment_token(cursor),
                     '=' => Equals,
                     '.' => Period,
                     ',' => Comma,
@@ -154,11 +155,11 @@ impl<'s> Iterator for Tokenizer<'s> {
                     '}' => RightBrace,
                     '[' => LeftBracket,
                     ']' => RightBracket,
-                    _ if is_keylike(ch) => self.keylike(),
+                    _ if is_keylike(ch) => Self::keylike(cursor),
                     _ => Unknown,
                 };
                 Some(Token {
-                    span: self.cursor.span_from(start),
+                    span: cursor.span_from(start),
                     kind,
                 })
             }
@@ -168,9 +169,10 @@ impl<'s> Iterator for Tokenizer<'s> {
                     kind: StrLitSubtoken(subtoken),
                 }),
                 None => {
-                    self.cursor = subtokenizer.cursor().clone();
-                    self.state = State::ReadingContent;
-                    // single-stackframe recursive call with new state
+                    // Hmm, `std::replace_with()` could be a good fit here:
+                    self.0 = State::ReadingContent(subtokenizer.cursor().clone());
+
+                    // single-stackframe recursive call with the new state
                     self.next()
                 }
             },
@@ -188,15 +190,59 @@ fn is_keylike(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{TokenKind, StrLitKind, Quotes, QuotesLen, StrLitSubtoken, Tokenizer};
+
     #[test]
     fn empty_input() {
         assert_tokens("", vec![]);
     }
 
     #[test]
+    fn multiple_string_literals() {
+        let sub = |it| TokenKind::StrLitSubtoken(it);
+
+        let one_single_quote = || StrLitSubtoken::LeadingQuotes(Quotes {
+            kind: StrLitKind::Literal,
+            len: QuotesLen::X1,
+        });
+        let one_double_quote = || StrLitSubtoken::LeadingQuotes(Quotes {
+            kind: StrLitKind::Basic,
+            len: QuotesLen::X1,
+        });
+
+        assert_tokens("'\\''", vec![
+            ((0, 1), sub(one_single_quote())),
+            ((1, 2), sub(StrLitSubtoken::Char('\\'))),
+            ((2, 3), sub(StrLitSubtoken::TrailingQuotes)),
+            ((3, 4), sub(one_single_quote()))
+        ]);
+        assert_tokens(
+            "'foo\n'",
+            vec![
+                ((0, 1), sub(one_single_quote())),
+                ((1, 2), sub(StrLitSubtoken::Char('f'))),
+                ((2, 3), sub(StrLitSubtoken::Char('o'))),
+                ((3, 4), sub(StrLitSubtoken::Char('o'))),
+                ((4, 5), TokenKind::Newline),
+                ((5, 6), sub(one_single_quote())),
+            ],
+        );
+        assert_tokens(
+            "\"foo\n\"",
+            vec![
+                ((0, 1), sub(one_double_quote())),
+                ((1, 2), sub(StrLitSubtoken::Char('f'))),
+                ((2, 3), sub(StrLitSubtoken::Char('o'))),
+                ((3, 4), sub(StrLitSubtoken::Char('o'))),
+                ((4, 5), TokenKind::Newline),
+                ((5, 6), sub(one_double_quote())),
+            ],
+        );
+    }
+
+    #[test]
     fn unknown_token() {
-        let t = |input| assert_single_token(input, Unknown);
+        let t = |input| assert_single_token(input, TokenKind::Unknown);
 
         t("\\");
         t("Ї");
@@ -208,7 +254,7 @@ mod tests {
 
     #[test]
     fn keylike() {
-        let t = |input| assert_single_token(input, Keylike);
+        let t = |input| assert_single_token(input, TokenKind::Keylike);
 
         t("foo");
         t("0bar");
@@ -225,46 +271,49 @@ mod tests {
         assert_tokens(
             " a ",
             vec![
-                ((0, 1), Whitespace),
-                ((1, 2), Keylike),
-                ((2, 3), Whitespace),
+                ((0, 1), TokenKind::Whitespace),
+                ((1, 2), TokenKind::Keylike),
+                ((2, 3), TokenKind::Whitespace),
             ],
         );
         assert_tokens(
             " a\t [[]] \t [] {} , . =\n# foo \r\n#foo \n ",
             vec![
-                ((0, 1), Whitespace),
-                ((1, 2), Keylike),
-                ((2, 4), Whitespace),
-                ((4, 5), LeftBracket),
-                ((5, 6), LeftBracket),
-                ((6, 7), RightBracket),
-                ((7, 8), RightBracket),
-                ((8, 11), Whitespace),
-                ((11, 12), LeftBracket),
-                ((12, 13), RightBracket),
-                ((13, 14), Whitespace),
-                ((14, 15), LeftBrace),
-                ((15, 16), RightBrace),
-                ((16, 17), Whitespace),
-                ((17, 18), Comma),
-                ((18, 19), Whitespace),
-                ((19, 20), Period),
-                ((20, 21), Whitespace),
-                ((21, 22), Equals),
-                ((22, 23), Newline),
-                ((23, 29), Comment),
-                ((29, 31), Newline),
-                ((31, 36), Comment),
-                ((36, 37), Newline),
-                ((37, 38), Whitespace),
+                ((0, 1), TokenKind::Whitespace),
+                ((1, 2), TokenKind::Keylike),
+                ((2, 4), TokenKind::Whitespace),
+                ((4, 5), TokenKind::LeftBracket),
+                ((5, 6), TokenKind::LeftBracket),
+                ((6, 7), TokenKind::RightBracket),
+                ((7, 8), TokenKind::RightBracket),
+                ((8, 11), TokenKind::Whitespace),
+                ((11, 12), TokenKind::LeftBracket),
+                ((12, 13), TokenKind::RightBracket),
+                ((13, 14), TokenKind::Whitespace),
+                ((14, 15), TokenKind::LeftBrace),
+                ((15, 16), TokenKind::RightBrace),
+                ((16, 17), TokenKind::Whitespace),
+                ((17, 18), TokenKind::Comma),
+                ((18, 19), TokenKind::Whitespace),
+                ((19, 20), TokenKind::Period),
+                ((20, 21), TokenKind::Whitespace),
+                ((21, 22), TokenKind::Equals),
+                ((22, 23), TokenKind::Newline),
+                ((23, 29), TokenKind::Comment),
+                ((29, 31), TokenKind::Newline),
+                ((31, 36), TokenKind::Comment),
+                ((36, 37), TokenKind::Newline),
+                ((37, 38), TokenKind::Whitespace),
             ],
         );
     }
 
     #[test]
     fn bad_comment() {
-        assert_tokens("#\u{0}", vec![((0, 1), Comment), ((1, 2), Unknown)]);
+        assert_tokens("#\u{0}", vec![
+            ((0, 1), TokenKind::Comment),
+            ((1, 2), TokenKind::Unknown)
+        ]);
     }
 
     fn assert_tokens(input: &str, expected: Vec<((usize, usize), TokenKind)>) {
