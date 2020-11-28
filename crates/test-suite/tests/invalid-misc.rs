@@ -11,7 +11,7 @@ macro_rules! bad {
 
 #[test]
 fn bad() {
-    bad!("a = 01", "invalid number at line 1 column 6");
+    bad!("a = 01", "invalid date at line 1 column 5");
     bad!("a = 1__1", "invalid number at line 1 column 5");
     bad!("a = 1_", "invalid number at line 1 column 5");
     bad!("''", "empty table key found at line 1 column 1");
@@ -29,7 +29,7 @@ fn bad() {
     bad!("a = -0x1", "invalid number at line 1 column 5");
     bad!(
         "a = 0x-1",
-        "failed to parse datetime for key `a` at line 1 column 5"
+        "invalid number at line 1 column 5"
     );
 
     // Dotted keys.

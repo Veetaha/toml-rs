@@ -53,7 +53,8 @@
 //! [`serde`]: https://serde.rs/
 //! [`rustc_lexer`]: https://docs.rs/rustc-ap-rustc_lexer/
 
-#![deny(missing_docs)]
+// TODO: uncomment:
+// #![deny(missing_docs)]
 #![warn(rust_2018_idioms)]
 // Makes rustc abort compilation if there are any unsafe blocks in the crate.
 // Presence of this annotation is picked up by tools such as cargo-geiger
@@ -64,9 +65,13 @@
 mod cursor;
 mod lexer;
 mod str_lit;
+mod num_lit;
+mod datetime_lit;
 
 pub use lexer::*;
 pub use str_lit::*;
+pub use num_lit::*;
+pub use datetime_lit::*;
 
 /// A span, designating a range of bytes where a token is located.
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]

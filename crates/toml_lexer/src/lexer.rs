@@ -1,7 +1,13 @@
 use std::char;
-use std::str;
+use std::{mem, str};
 
-use crate::{cursor::Cursor, str_lit, Span};
+use crate::{
+    cursor::Cursor,
+    str_lit,
+    Span,
+    num_lit::{NumLitError, NumLit, NumLitParser},
+    datetime_lit::{DatetimeLitError, DatetimeLit, DatetimeParser}
+};
 use TokenKind::*;
 /// Represents a (possibly malformed) lexeme of TOML language.
 pub struct Token {
@@ -49,6 +55,11 @@ pub enum TokenKind {
     StrLitSubtoken(str_lit::StrLitSubtoken),
 }
 
+pub enum NumOrDatetimeLitResult {
+    Num(Result<NumLit, NumLitError>),
+    Datetime(Result<DatetimeLit, DatetimeLitError>)
+}
+
 /// Tokenizer is called to break a string up into its component tokens.
 /// It implements `Iterator<Item = Token>` for this purpose.
 /// ```
@@ -58,10 +69,10 @@ pub enum TokenKind {
 /// }
 /// ```
 #[derive(Clone)]
-pub struct Tokenizer<'s>(State<'s>);
+pub struct Tokenizer<'s>(pub(crate) State<'s>);
 
 #[derive(Clone)]
-enum State<'s> {
+pub(crate) enum State<'s> {
     ReadingContent(Cursor<'s>),
     ReadingStrLit(str_lit::StrLitTokenizer<'s>),
 }
@@ -78,6 +89,46 @@ impl<'s> Tokenizer<'s> {
         cursor.eatc('\u{feff}');
         Tokenizer(State::ReadingContent(cursor))
     }
+
+    pub fn eat_num_or_datetime_lit(&mut self) -> Option<(Span, NumOrDatetimeLitResult)> {
+        let cursor = match &mut self.0 {
+            State::ReadingContent(it) => it,
+            State::ReadingStrLit(_) => return None,
+        };
+
+        let start = cursor.current_index();
+        let initial_cursor = cursor.clone();
+
+        // Try to consume both the number literal and the datetime literal, then
+        // figure out which fits best by checking which resulting literals was longer.
+        let num_result = NumLitParser::new(cursor).eat_number();
+
+        let cursor_after_num = mem::replace(cursor, initial_cursor);
+        let dt_result = DatetimeParser::new(cursor).eat_datetime();
+
+        let result = match (num_result, dt_result) {
+            (None, None) => return None,
+            (None, Some(dt_result)) => {
+                NumOrDatetimeLitResult::Datetime(dt_result)
+            }
+            (Some(num_result), None) => {
+                *cursor = cursor_after_num;
+                NumOrDatetimeLitResult::Num(num_result)
+            }
+            (Some(num_result), Some(dt_result)) => {
+                if cursor.current_index() > cursor_after_num.current_index() {
+                    NumOrDatetimeLitResult::Datetime(dt_result)
+                } else {
+                    *cursor = cursor_after_num;
+                    NumOrDatetimeLitResult::Num(num_result)
+                }
+            }
+        };
+
+        Some((cursor.span_from(start), result))
+    }
+
+
 
     fn cursor(&self) -> &Cursor<'s> {
         match &self.0 {

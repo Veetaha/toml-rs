@@ -49,6 +49,7 @@ macro_rules! float_inf_tests {
         assert!(inf.sf5.is_nan());
         assert!(inf.sf5.is_sign_positive());
         assert!(inf.sf6.is_nan());
+        dbg!(inf.sf6);
         assert!(inf.sf6.is_sign_negative());
 
         assert_eq!(inf.sf7, 0.0);

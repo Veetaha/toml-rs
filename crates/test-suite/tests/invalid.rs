@@ -17,22 +17,22 @@ macro_rules! test( ($name:ident, $s:expr, $msg:expr) => (
 test!(
     datetime_malformed_no_leads,
     include_str!("invalid/datetime-malformed-no-leads.toml"),
-    "failed to parse datetime for key `no-leads` at line 1 column 12"
+    "invalid date at line 1 column 12"
 );
 test!(
     datetime_malformed_no_secs,
     include_str!("invalid/datetime-malformed-no-secs.toml"),
-    "expected a colon, found a newline at line 1 column 28"
+    "invalid date at line 1 column 11"
 );
 test!(
     datetime_malformed_no_t,
     include_str!("invalid/datetime-malformed-no-t.toml"),
-    "failed to parse datetime for key `no-t` at line 1 column 8"
+    "expected newline, found an identifier at line 1 column 18"
 );
 test!(
     datetime_malformed_with_milli,
     include_str!("invalid/datetime-malformed-with-milli.toml"),
-    "failed to parse datetime for key `with-milli` at line 1 column 14"
+    "invalid date at line 1 column 14"
 );
 test!(
     duplicate_key_table,
@@ -72,12 +72,12 @@ test!(
 test!(
     float_no_suffix,
     include_str!("invalid/float-no-suffix.toml"),
-    "invalid number at line 1 column 5"
+    "expected newline, found an identifier at line 1 column 8"
 );
 test!(
     float_no_trailing_digits,
     include_str!("invalid/float-no-trailing-digits.toml"),
-    "invalid number at line 1 column 12"
+    "invalid number at line 1 column 10"
 );
 test!(
     key_after_array,
@@ -197,7 +197,7 @@ test!(
 test!(
     text_after_array_entries,
     include_str!("invalid/text-after-array-entries.toml"),
-    "invalid number at line 2 column 46"
+    "expected a value, found an identifier at line 2 column 46"
 );
 test!(
     text_after_integer,
@@ -222,5 +222,5 @@ test!(
 test!(
     text_in_array,
     include_str!("invalid/text-in-array.toml"),
-    "invalid number at line 3 column 3"
+    "expected a value, found an identifier at line 3 column 3"
 );

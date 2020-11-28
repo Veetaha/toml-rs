@@ -182,6 +182,10 @@ impl<'a> Tokenizer<'a> {
         )))
     }
 
+    pub(crate) fn expect_num_or_datetime_lit(&mut self) -> Option<(Span, toml_lexer::NumOrDatetimeLitResult)> {
+        self.inner.eat_num_or_datetime_lit()
+    }
+
     fn input_slice(&self, span: Span) -> &'a str {
         &self.inner.input()[span.start..span.end]
     }

@@ -245,12 +245,12 @@ fn string_no_newline() {
 
 #[test]
 fn bad_leading_zeros() {
-    bad!("a = 00", "invalid number at line 1 column 6");
-    bad!("a = -00", "invalid number at line 1 column 7");
-    bad!("a = +00", "invalid number at line 1 column 7");
-    bad!("a = 00.0", "invalid number at line 1 column 6");
-    bad!("a = -00.0", "invalid number at line 1 column 7");
-    bad!("a = +00.0", "invalid number at line 1 column 7");
+    bad!("a = 00", "invalid date at line 1 column 5");
+    bad!("a = -00", "invalid number at line 1 column 5");
+    bad!("a = +00", "invalid number at line 1 column 5");
+    bad!("a = 00.0", "invalid date at line 1 column 5");
+    bad!("a = -00.0", "invalid number at line 1 column 5");
+    bad!("a = +00.0", "invalid number at line 1 column 5");
     bad!(
         "a = 9223372036854775808",
         "invalid number at line 1 column 5"
@@ -263,12 +263,12 @@ fn bad_leading_zeros() {
 
 #[test]
 fn bad_floats() {
-    bad!("a = 0.", "invalid number at line 1 column 7");
-    bad!("a = 0.e", "invalid number at line 1 column 7");
-    bad!("a = 0.E", "invalid number at line 1 column 7");
+    bad!("a = 0.", "invalid number at line 1 column 5");
+    bad!("a = 0.e", "invalid number at line 1 column 5");
+    bad!("a = 0.E", "invalid number at line 1 column 5");
     bad!("a = 0.0E", "invalid number at line 1 column 5");
     bad!("a = 0.0e", "invalid number at line 1 column 5");
-    bad!("a = 0.0e-", "invalid number at line 1 column 9");
+    bad!("a = 0.0e-", "invalid number at line 1 column 5");
     bad!("a = 0.0e+", "invalid number at line 1 column 5");
 }
 
@@ -540,14 +540,14 @@ fn booleans() {
 
     bad!(
         "foo = true2",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected a value, found an identifier at line 1 column 7"
     );
-    bad!("foo = false2", "invalid number at line 1 column 7");
+    bad!("foo = false2", "expected a value, found an identifier at line 1 column 7");
     bad!(
         "foo = t1",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected a value, found an identifier at line 1 column 7"
     );
-    bad!("foo = f2", "invalid number at line 1 column 7");
+    bad!("foo = f2", "expected a value, found an identifier at line 1 column 7");
 }
 
 #[test]
@@ -648,29 +648,29 @@ fn datetimes() {
     t!("2016-09-09T09:09:09.123456789-02:00");
     bad!(
         "foo = 2016-09-09T09:09:09.Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 2016-9-09T09:09:09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 2016-09-09T09:09:09+2:00",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 2016-09-09T09:09:09-2:00",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 2016-09-09T09:09:09Z-2:00",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected newline, found an identifier at line 1 column 27"
     );
 }
 
 #[test]
 fn require_newline_after_value() {
-    bad!("0=0r=false", "invalid number at line 1 column 3");
+    bad!("0=0r=false", "expected newline, found an identifier at line 1 column 4");
     bad!(
         r#"
 0=""o=""m=""r=""00="0"q="""0"""e="""0"""
@@ -696,12 +696,12 @@ fn require_newline_after_value() {
         r#"
 0=0r0=0r=false
 "#,
-        "invalid number at line 2 column 3"
+        "expected newline, found an identifier at line 2 column 4"
     );
     bad!(
         r#"
 0=0r0=0r=falsefal=false
 "#,
-        "invalid number at line 2 column 3"
+        "expected newline, found an identifier at line 2 column 4"
     );
 }

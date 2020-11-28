@@ -37,6 +37,19 @@ impl<'s> Cursor<'s> {
         }
     }
 
+    pub(crate) fn eat_keyword(&mut self, keyword: &str) -> bool {
+        debug_assert!(keyword.chars().all(|ch| ch.is_ascii_alphabetic()));
+
+        if self.chars.chars.as_str().starts_with(keyword) {
+            for _ in 0..keyword.len() {
+                self.one();
+            }
+            return true;
+        }
+        false
+    }
+
+
     /// Calculate the span of the currently analyzed token.
     pub(crate) fn span_from(&self, start: usize) -> Span {
         Span {
@@ -52,12 +65,24 @@ impl<'s> Cursor<'s> {
 
     pub(crate) fn peek_two(&self) -> Option<(char, char)> {
         let mut chars = self.chars.clone();
-        Some((chars.next()?.1, chars.next()?.1))
+        let ch1 = chars.next()?.1;
+        let ch2 = chars.next()?.1;
+        Some((ch1, ch2))
     }
 
     /// Peek one char without consuming it.
     pub(crate) fn peek_one_with_index(&self) -> Option<(usize, char)> {
         self.chars.clone().next()
+    }
+
+    /// Take two chars.
+    pub(crate) fn two(&mut self) -> Option<(char, char)> {
+        let pair = self.peek_two();
+        if let Some(_) = pair {
+            self.one();
+            self.one();
+        }
+        pair
     }
 
     /// Take one char.

@@ -1415,6 +1415,8 @@ impl<'a> Deserializer<'a> {
 
     fn value(&mut self) -> Result<Value<'a>, Error> {
         let at = self.tokens.current_index();
+        let prev_tokens = self.tokens.clone();
+
         let value = match self.next()? {
             Some((Span { start, end }, Token::String { val, .. })) => Value {
                 e: E::String(val),
@@ -1431,8 +1433,11 @@ impl<'a> Deserializer<'a> {
                 start,
                 end,
             },
-            Some((span, Token::Keylike(key))) => self.number_or_date(span, key)?,
-            Some((span, Token::Plus)) => self.number_leading_plus(span)?,
+            Some((_, Token::Plus)) |
+            Some((_, Token::Keylike(_))) => {
+                self.tokens = prev_tokens;
+                return self.number_or_date();
+            }
             Some((Span { start, .. }, Token::LeftBrace)) => {
                 self.inline_table().map(|(Span { end, .. }, table)| Value {
                     e: E::InlineTable(table),
@@ -1461,26 +1466,32 @@ impl<'a> Deserializer<'a> {
         Ok(value)
     }
 
-    fn number_or_date(&mut self, span: Span, s: &'a str) -> Result<Value<'a>, Error> {
-        if s.contains('T')
-            || s.contains('t')
-            || (s.len() > 1 && s[1..].contains('-') && !s.contains("e-") && !s.contains("E-"))
-        {
-            self.datetime(span, s, false)
-                .map(|(Span { start, end }, d)| Value {
-                    e: E::Datetime(d),
-                    start,
-                    end,
-                })
-        } else if self.eat(Token::Colon)? {
-            self.datetime(span, s, true)
-                .map(|(Span { start, end }, d)| Value {
-                    e: E::Datetime(d),
-                    start,
-                    end,
-                })
-        } else {
-            self.number(span, s)
+    fn number_or_date(&mut self) -> Result<Value<'a>, Error> {
+        let (span, result) = self.tokens.expect_num_or_datetime_lit().ok_or_else(|| {
+            let (span, token) = self.next().unwrap().unwrap();
+            self.error(span.start, ErrorKind::Wanted {
+                expected: "a value",
+                found: token.describe()
+            })
+        })?;
+        let val = |e| Value {
+            e,
+            start: span.start,
+            end: span.end,
+        };
+        match result {
+            toml_lexer::NumOrDatetimeLitResult::Num(num) => match num {
+                Ok(toml_lexer::NumLit::Int(int)) => Ok(val(E::Integer(int))),
+                Ok(toml_lexer::NumLit::Float(float)) => Ok(val(E::Float(float))),
+                // TODO: report more specific error taking into account _err
+                Err(_err) => Err(self.error(span.start, ErrorKind::NumberInvalid)),
+            }
+            toml_lexer::NumOrDatetimeLitResult::Datetime(dt) => match dt {
+                // TODO: use already parsed datetime here
+                Ok(_dt) => Ok(val(E::Datetime(&self.input[span.start..span.end]))),
+                // TODO: report more specific error taking into account _err
+                Err(_err) => Err(self.error(span.start, ErrorKind::DateInvalid))
+            }
         }
     }
 
@@ -1534,250 +1545,6 @@ impl<'a> Deserializer<'a> {
             Some(_) => self.value().map(|val| (val, None)),
             None => Err(self.eof()),
         }
-    }
-
-    fn number(&mut self, Span { start, end }: Span, s: &'a str) -> Result<Value<'a>, Error> {
-        let to_integer = |f| Value {
-            e: E::Integer(f),
-            start,
-            end,
-        };
-        if s.starts_with("0x") {
-            self.integer(&s[2..], 16).map(to_integer)
-        } else if s.starts_with("0o") {
-            self.integer(&s[2..], 8).map(to_integer)
-        } else if s.starts_with("0b") {
-            self.integer(&s[2..], 2).map(to_integer)
-        } else if s.contains('e') || s.contains('E') {
-            self.float(s, None).map(|f| Value {
-                e: E::Float(f),
-                start,
-                end,
-            })
-        } else if self.eat(Token::Period)? {
-            let at = self.tokens.current_index();
-            match self.next()? {
-                Some((Span { start, end }, Token::Keylike(after))) => {
-                    self.float(s, Some(after)).map(|f| Value {
-                        e: E::Float(f),
-                        start,
-                        end,
-                    })
-                }
-                _ => Err(self.error(at, ErrorKind::NumberInvalid)),
-            }
-        } else if s == "inf" {
-            Ok(Value {
-                e: E::Float(f64::INFINITY),
-                start,
-                end,
-            })
-        } else if s == "-inf" {
-            Ok(Value {
-                e: E::Float(f64::NEG_INFINITY),
-                start,
-                end,
-            })
-        } else if s == "nan" {
-            Ok(Value {
-                e: E::Float(f64::NAN),
-                start,
-                end,
-            })
-        } else if s == "-nan" {
-            Ok(Value {
-                e: E::Float(-f64::NAN),
-                start,
-                end,
-            })
-        } else {
-            self.integer(s, 10).map(to_integer)
-        }
-    }
-
-    fn number_leading_plus(&mut self, Span { start, .. }: Span) -> Result<Value<'a>, Error> {
-        let start_token = self.tokens.current_index();
-        match self.next()? {
-            Some((Span { end, .. }, Token::Keylike(s))) => self.number(Span { start, end }, s),
-            _ => Err(self.error(start_token, ErrorKind::NumberInvalid)),
-        }
-    }
-
-    fn integer(&self, s: &'a str, radix: u32) -> Result<i64, Error> {
-        let allow_sign = radix == 10;
-        let allow_leading_zeros = radix != 10;
-        let (prefix, suffix) = self.parse_integer(s, allow_sign, allow_leading_zeros, radix)?;
-        let start = self.tokens.substr_offset(s);
-        if suffix != "" {
-            return Err(self.error(start, ErrorKind::NumberInvalid));
-        }
-        i64::from_str_radix(&prefix.replace("_", "").trim_start_matches('+'), radix)
-            .map_err(|_e| self.error(start, ErrorKind::NumberInvalid))
-    }
-
-    fn parse_integer(
-        &self,
-        s: &'a str,
-        allow_sign: bool,
-        allow_leading_zeros: bool,
-        radix: u32,
-    ) -> Result<(&'a str, &'a str), Error> {
-        let start = self.tokens.substr_offset(s);
-
-        let mut first = true;
-        let mut first_zero = false;
-        let mut underscore = false;
-        let mut end = s.len();
-        for (i, c) in s.char_indices() {
-            let at = i + start;
-            if i == 0 && (c == '+' || c == '-') && allow_sign {
-                continue;
-            }
-
-            if c == '0' && first {
-                first_zero = true;
-            } else if c.is_digit(radix) {
-                if !first && first_zero && !allow_leading_zeros {
-                    return Err(self.error(at, ErrorKind::NumberInvalid));
-                }
-                underscore = false;
-            } else if c == '_' && first {
-                return Err(self.error(at, ErrorKind::NumberInvalid));
-            } else if c == '_' && !underscore {
-                underscore = true;
-            } else {
-                end = i;
-                break;
-            }
-            first = false;
-        }
-        if first || underscore {
-            return Err(self.error(start, ErrorKind::NumberInvalid));
-        }
-        Ok((&s[..end], &s[end..]))
-    }
-
-    fn float(&mut self, s: &'a str, after_decimal: Option<&'a str>) -> Result<f64, Error> {
-        let (integral, mut suffix) = self.parse_integer(s, true, false, 10)?;
-        let start = self.tokens.substr_offset(integral);
-
-        let mut fraction = None;
-        if let Some(after) = after_decimal {
-            if suffix != "" {
-                return Err(self.error(start, ErrorKind::NumberInvalid));
-            }
-            let (a, b) = self.parse_integer(after, false, true, 10)?;
-            fraction = Some(a);
-            suffix = b;
-        }
-
-        let mut exponent = None;
-        if suffix.starts_with('e') || suffix.starts_with('E') {
-            let (a, b) = if suffix.len() == 1 {
-                self.eat(Token::Plus)?;
-                match self.next()? {
-                    Some((_, Token::Keylike(s))) => self.parse_integer(s, false, true, 10)?,
-                    _ => return Err(self.error(start, ErrorKind::NumberInvalid)),
-                }
-            } else {
-                self.parse_integer(&suffix[1..], true, true, 10)?
-            };
-            if b != "" {
-                return Err(self.error(start, ErrorKind::NumberInvalid));
-            }
-            exponent = Some(a);
-        } else if !suffix.is_empty() {
-            return Err(self.error(start, ErrorKind::NumberInvalid));
-        }
-
-        let mut number = integral
-            .trim_start_matches('+')
-            .chars()
-            .filter(|c| *c != '_')
-            .collect::<String>();
-        if let Some(fraction) = fraction {
-            number.push_str(".");
-            number.extend(fraction.chars().filter(|c| *c != '_'));
-        }
-        if let Some(exponent) = exponent {
-            number.push_str("E");
-            number.extend(exponent.chars().filter(|c| *c != '_'));
-        }
-        number
-            .parse()
-            .map_err(|_e| self.error(start, ErrorKind::NumberInvalid))
-            .and_then(|n: f64| {
-                if n.is_finite() {
-                    Ok(n)
-                } else {
-                    Err(self.error(start, ErrorKind::NumberInvalid))
-                }
-            })
-    }
-
-    fn datetime(
-        &mut self,
-        mut span: Span,
-        date: &'a str,
-        colon_eaten: bool,
-    ) -> Result<(Span, &'a str), Error> {
-        let start = self.tokens.substr_offset(date);
-
-        // Check for space separated date and time.
-        let mut lookahead = self.tokens.clone();
-        if let Ok(Some((_, Token::Whitespace(" ")))) = lookahead.next() {
-            // Check if hour follows.
-            if let Ok(Some((_, Token::Keylike(_)))) = lookahead.next() {
-                self.next()?; // skip space
-                self.next()?; // skip keylike hour
-            }
-        }
-
-        if colon_eaten || self.eat(Token::Colon)? {
-            // minutes
-            match self.next()? {
-                Some((_, Token::Keylike(_))) => {}
-                _ => return Err(self.error(start, ErrorKind::DateInvalid)),
-            }
-            // Seconds
-            self.expect(Token::Colon)?;
-            match self.next()? {
-                Some((Span { end, .. }, Token::Keylike(_))) => {
-                    span.end = end;
-                }
-                _ => return Err(self.error(start, ErrorKind::DateInvalid)),
-            }
-            // Fractional seconds
-            if self.eat(Token::Period)? {
-                match self.next()? {
-                    Some((Span { end, .. }, Token::Keylike(_))) => {
-                        span.end = end;
-                    }
-                    _ => return Err(self.error(start, ErrorKind::DateInvalid)),
-                }
-            }
-
-            // offset
-            if self.eat(Token::Plus)? {
-                match self.next()? {
-                    Some((Span { end, .. }, Token::Keylike(_))) => {
-                        span.end = end;
-                    }
-                    _ => return Err(self.error(start, ErrorKind::DateInvalid)),
-                }
-            }
-            if self.eat(Token::Colon)? {
-                match self.next()? {
-                    Some((Span { end, .. }, Token::Keylike(_))) => {
-                        span.end = end;
-                    }
-                    _ => return Err(self.error(start, ErrorKind::DateInvalid)),
-                }
-            }
-        }
-
-        let end = self.tokens.current_index();
-        Ok((span, &self.tokens.input()[start..end]))
     }
 
     // TODO(#140): shouldn't buffer up this entire table in memory, it'd be

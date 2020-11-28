@@ -44,23 +44,23 @@ fn times() {
 fn bad_times() {
     bad!(
         "foo = 199-09-09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected newline, found an identifier at line 1 column 10"
     );
     bad!(
         "foo = 199709-09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected newline, found an identifier at line 1 column 13"
     );
     bad!(
         "foo = 1997-9-09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-9",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-0909:09:09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected newline, found an identifier at line 1 column 17"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.",
@@ -68,15 +68,15 @@ fn bad_times() {
     );
     bad!(
         "foo = T",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected a value, found an identifier at line 1 column 7"
     );
     bad!(
         "foo = T.",
-        "expected newline, found a period at line 1 column 8"
+        "expected a value, found an identifier at line 1 column 7"
     );
     bad!(
         "foo = TZ",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "expected a value, found an identifier at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09+",
@@ -84,51 +84,51 @@ fn bad_times() {
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09+09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09+09:9",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09+0909",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09-",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09-09",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09-09:9",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T09:09:09.09-0909",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
 
     bad!(
         "foo = 1997-00-09T09:09:09.09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-00T09:09:09.09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T30:09:09.09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T12:69:09.09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
     bad!(
         "foo = 1997-09-09T12:09:69.09Z",
-        "failed to parse datetime for key `foo` at line 1 column 7"
+        "invalid date at line 1 column 7"
     );
 }
